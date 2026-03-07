@@ -99,6 +99,13 @@ def vllm() -> type[ModelAPI]:
     return VLLMAPI
 
 
+@modelapi(name="vllm_batch")
+def vllm_batch() -> type[ModelAPI]:
+    from .vllm_batch import VLLMBatchAPI
+
+    return VLLMBatchAPI
+
+
 @modelapi(name="cf")
 def cf() -> type[ModelAPI]:
     from .cloudflare import CloudFlareAPI

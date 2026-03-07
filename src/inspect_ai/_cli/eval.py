@@ -402,6 +402,14 @@ def eval_options(func: Callable[..., Any]) -> Callable[..., click.Context]:
         envvar="INSPECT_EVAL_SCORE_DISPLAY",
     )
     @click.option(
+        "--sequential-scoring",
+        type=bool,
+        is_flag=True,
+        default=None,
+        help="Run all generation first (Phase 1), then all scoring (Phase 2). Auto-enabled when using vllm_batch provider.",
+        envvar="INSPECT_EVAL_SEQUENTIAL_SCORING",
+    )
+    @click.option(
         "--generate-config",
         type=str,
         envvar="INSPECT_EVAL_GENERATE_CONFIG",
@@ -686,6 +694,7 @@ def eval_command(
     log_shared: int | None,
     no_score: bool | None,
     no_score_display: bool | None,
+    sequential_scoring: bool | None,
     log_format: Literal["eval", "json"] | None,
     log_level_transcript: str,
     **common: Unpack[CommonOptions],
@@ -750,6 +759,7 @@ def eval_command(
         log_shared=log_shared,
         no_score=no_score,
         no_score_display=no_score_display,
+        sequential_scoring=sequential_scoring,
         is_eval_set=False,
         **config,
     )
@@ -900,6 +910,7 @@ def eval_set_command(
     log_shared: int | None,
     no_score: bool | None,
     no_score_display: bool | None,
+    sequential_scoring: bool | None,
     bundle_dir: str | None,
     bundle_overwrite: bool | None,
     embed_viewer: bool | None,
@@ -972,6 +983,7 @@ def eval_set_command(
         log_shared=log_shared,
         no_score=no_score,
         no_score_display=no_score_display,
+        sequential_scoring=sequential_scoring,
         is_eval_set=True,
         retry_attempts=retry_attempts,
         retry_wait=retry_wait,
@@ -1041,6 +1053,7 @@ def eval_exec(
     log_shared: int | None,
     no_score: bool | None,
     no_score_display: bool | None,
+    sequential_scoring: bool | None = None,
     is_eval_set: bool = False,
     retry_attempts: int | None = None,
     retry_wait: int | None = None,
@@ -1157,6 +1170,7 @@ def eval_exec(
             log_shared=log_shared,
             score=score,
             score_display=score_display,
+            sequential_scoring=sequential_scoring if sequential_scoring else None,
         )
         | kwargs
     )

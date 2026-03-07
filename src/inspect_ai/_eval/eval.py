@@ -132,6 +132,7 @@ def eval(
     run_samples: bool = True,
     score: bool = True,
     score_display: bool | None = None,
+    sequential_scoring: bool | None = None,
     eval_set_id: str | None = None,
     **kwargs: Unpack[GenerateConfigArgs],
 ) -> list[EvalLog]:
@@ -284,6 +285,7 @@ def eval(
                 run_samples=run_samples,
                 score=score,
                 score_display=score_display,
+                sequential_scoring=sequential_scoring,
                 eval_set_id=eval_set_id,
                 **kwargs,
             )
@@ -347,6 +349,7 @@ async def eval_async(
     run_samples: bool = True,
     score: bool = True,
     score_display: bool | None = None,
+    sequential_scoring: bool | None = None,
     eval_set_id: str | None = None,
     **kwargs: Unpack[GenerateConfigArgs],
 ) -> list[EvalLog]:
@@ -476,6 +479,7 @@ async def eval_async(
                 run_samples=run_samples,
                 score=score,
                 score_display=score_display,
+                sequential_scoring=sequential_scoring,
                 eval_set_id=eval_set_id,
                 **kwargs,
             )
@@ -544,6 +548,7 @@ async def _eval_async_inner(
     run_samples: bool = True,
     score: bool = True,
     score_display: bool | None = None,
+    sequential_scoring: bool | None = None,
     eval_set_id: str | None = None,
     **kwargs: Unpack[GenerateConfigArgs],
 ) -> list[EvalLog]:
@@ -592,6 +597,13 @@ async def _eval_async_inner(
             task_group=tg,
             **kwargs,
         )
+
+        # auto-enable sequential_scoring when using vllm_batch provider
+        if sequential_scoring is None:
+            from inspect_ai.model._providers.vllm_batch import VLLMBatchAPI
+
+            if any(isinstance(m.api, VLLMBatchAPI) for m in model):
+                sequential_scoring = True
 
         # resolve tasks
         resolved_tasks, approval = eval_resolve_tasks(
@@ -712,13 +724,17 @@ async def _eval_async_inner(
             log_buffer=log_buffer,
             log_shared=log_shared,
             score_display=score_display,
+            sequential_scoring=sequential_scoring,
         )
 
         # run tasks - 2 codepaths, one for the traditional task at a time
         # (w/ optional multiple models) and the other for true multi-task
         # (which requires different scheduling and UI)
         task_definitions = len(resolved_tasks) // len(model)
-        parallel = 1 if (task_definitions == 1 or max_tasks is None) else max_tasks
+        if sequential_scoring:
+            parallel = task_definitions
+        else:
+            parallel = 1 if (task_definitions == 1 or max_tasks is None) else max_tasks
 
         await emit_run_start(eval_set_id, run_id, resolved_tasks)
 

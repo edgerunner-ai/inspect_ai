@@ -256,6 +256,12 @@ async def eval_run(
                     )
                 )
 
+        # sequential scoring: run all generation first, then score all logs
+        if eval_config.sequential_scoring:
+            return await run_sequential_scoring(
+                task_run_options, tasks, parallel, debug_errors, recorder
+            )
+
         # multiple mode is for running/displaying multiple
         # task definitions, which requires some smart scheduling
         # to ensure that we spread work among models
@@ -457,6 +463,86 @@ async def run_multiple(tasks: list[TaskRunOptions], parallel: int) -> list[EvalL
 
         # Sort results by original index and return just the values
         return [r for _, r in sorted(results)]
+
+
+async def run_sequential_scoring(
+    task_run_options: list[TaskRunOptions],
+    resolved_tasks: list[ResolvedTask],
+    parallel: int,
+    debug_errors: bool,
+    recorder: Recorder,
+) -> list[EvalLog]:
+    """Two-phase eval flow: all generation first, then all scoring.
+
+    Phase 1: Run all tasks with scoring disabled (generation only).
+    Phase 2: Read each log from disk (to get samples that were streamed
+             in high-throughput mode) and score using score_async().
+    This ensures the evaluated model gets exclusive GPU access during
+    generation, then the judge model gets exclusive GPU access during scoring.
+    """
+    from inspect_ai._eval.score import score_async
+    from inspect_ai.log._file import read_eval_log_async
+
+    # Phase 1: disable scoring and run all tasks
+    original_scores = []
+    task_scorers = []
+    for options in task_run_options:
+        original_scores.append(options.score)
+        task_scorers.append(options.task.scorer)
+        options.score = False
+
+    log.info("Sequential scoring Phase 1: Running generation for all tasks")
+
+    if parallel > 1:
+        phase1_logs = await run_multiple(task_run_options, parallel)
+    else:
+        phase1_logs = await run_single(task_run_options, debug_errors)
+
+    # Phase 2: score all logs concurrently so all scorer requests land in
+    # the same VLLMBatchAPI shared batcher → single vllm run-batch call.
+    log.info("Sequential scoring Phase 2: Scoring all completed logs")
+
+    import asyncio
+
+    async def _score_one(i: int, eval_log: EvalLog) -> EvalLog:
+        scorers = task_scorers[i]
+        if scorers and original_scores[i] and eval_log.status in ("success", "error"):
+            try:
+                # In high-throughput mode, samples are streamed to disk and
+                # not kept in memory (log.samples is None). Re-read the full
+                # log from disk so score_async has access to the samples.
+                if eval_log.samples is None and eval_log.location:
+                    log.info(
+                        f"Reading log from disk for scoring: {eval_log.location}"
+                    )
+                    eval_log = await read_eval_log_async(eval_log.location)
+
+                scored_log = await score_async(
+                    log=eval_log,
+                    scorers=scorers,
+                    action="overwrite",
+                    copy=False,
+                )
+                if eval_log.location:
+                    await recorder.__class__.write_log(
+                        eval_log.location, scored_log
+                    )
+                return scored_log
+            except Exception as ex:
+                log.warning(
+                    f"Error scoring log {eval_log.location}: {exception_message(ex)}"
+                )
+                return eval_log
+        else:
+            return eval_log
+
+    scored_logs = list(
+        await asyncio.gather(
+            *[_score_one(i, eval_log) for i, eval_log in enumerate(phase1_logs)]
+        )
+    )
+
+    return scored_logs
 
 
 def resolve_task_sample_ids(

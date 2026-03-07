@@ -167,6 +167,17 @@ class EvalConfig(BaseModel):
     score_display: bool | None = Field(default=None)
     """Display scoring metrics realtime."""
 
+    sequential_scoring: bool | None = Field(default=None)
+    """Run all generation first, then all scoring.
+
+    When enabled, the eval flow is split into two phases:
+    Phase 1: Run all tasks without scoring (generation only).
+    Phase 2: Score all completed logs.
+    This is useful with the vllm_batch provider to ensure the evaluated
+    model gets all GPUs during generation, then the judge model gets
+    all GPUs during scoring.
+    """
+
     @property
     def max_messages(self) -> int | None:
         """Deprecated max_messages property."""
