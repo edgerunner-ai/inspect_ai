@@ -110,6 +110,12 @@ class VLLMBatchAPI(ModelAPI):
         }
         self._batch_send_delay = float(self._model_args.pop("batch_send_delay", 30))
 
+        # Keys that belong in the request body, not the vllm CLI
+        self._chat_template_kwargs = self._model_args.pop("chat_template_kwargs", None)
+        if isinstance(self._chat_template_kwargs, str):
+            import json
+            self._chat_template_kwargs = json.loads(self._chat_template_kwargs)
+
     @override
     def collapse_user_messages(self) -> bool:
         return True
@@ -156,6 +162,8 @@ class VLLMBatchAPI(ModelAPI):
             "messages": [dict(m) for m in openai_messages],
             **{k: v for k, v in params.items() if k != "model"},
         }
+        if self._chat_template_kwargs:
+            request_body["chat_template_kwargs"] = self._chat_template_kwargs
 
         custom_id = str(uuid.uuid4())
         batch_line = {
