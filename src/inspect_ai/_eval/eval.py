@@ -598,13 +598,6 @@ async def _eval_async_inner(
             **kwargs,
         )
 
-        # auto-enable sequential_scoring when using vllm_batch provider
-        if sequential_scoring is None:
-            from inspect_ai.model._providers.vllm_batch import VLLMBatchAPI
-
-            if any(isinstance(m.api, VLLMBatchAPI) for m in model):
-                sequential_scoring = True
-
         # resolve tasks
         resolved_tasks, approval = eval_resolve_tasks(
             tasks,
@@ -622,6 +615,16 @@ async def _eval_async_inner(
             raise PrerequisiteError(
                 "Error: No inspect tasks were found at the specified paths."
             )
+
+        # auto-enable sequential_scoring when using vllm_batch provider
+        # (check both the model list and the resolved tasks' models, since
+        # eval_set passes model=None and models live inside resolved tasks)
+        if sequential_scoring is None:
+            from inspect_ai.model._providers.vllm_batch import VLLMBatchAPI
+
+            all_models = list(model) + [t.model for t in resolved_tasks]
+            if any(isinstance(m.api, VLLMBatchAPI) for m in all_models):
+                sequential_scoring = True
 
         resolve_model_costs(resolved_tasks, cost_limit)
 
