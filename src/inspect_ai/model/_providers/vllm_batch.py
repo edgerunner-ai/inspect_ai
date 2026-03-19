@@ -231,6 +231,32 @@ class VLLMBatchAPI(ModelAPI):
                     shared.worker_running = False
                     return
 
+    def _resolve_model_dir(self, revision: str | None = None) -> str | None:
+        """Return the local directory containing the model files.
+
+        For a local path this is trivial.  For a HuggingFace repo ID we ask
+        ``huggingface_hub`` for the cached snapshot so we can locate files
+        that ship inside the model repo (e.g. custom reasoning-parser plugins).
+        """
+        model = self.base_model
+        if os.path.isdir(model):
+            return model
+        try:
+            from huggingface_hub import snapshot_download
+
+            return snapshot_download(
+                model,
+                revision=revision,
+                local_files_only=True,
+            )
+        except Exception:
+            try:
+                from huggingface_hub import snapshot_download
+
+                return snapshot_download(model, revision=revision)
+            except Exception:
+                return None
+
     async def _run_batch(
         self, requests: list[dict[str, Any]]
     ) -> dict[str, dict[str, Any]]:
@@ -238,6 +264,26 @@ class VLLMBatchAPI(ModelAPI):
         model_args = dict(self._model_args)
 
         revision = model_args.pop("revision", None)
+
+        # If reasoning_parser_plugin is a bare filename (not an absolute path),
+        # resolve it against the model's local snapshot directory so that plugin
+        # files shipped inside a HuggingFace repo are found automatically.
+        if "reasoning_parser_plugin" in model_args:
+            plugin = model_args["reasoning_parser_plugin"]
+            if not os.path.isabs(plugin):
+                model_dir = self._resolve_model_dir(revision)
+                if model_dir:
+                    candidate = os.path.join(model_dir, plugin)
+                    if os.path.exists(candidate):
+                        model_args["reasoning_parser_plugin"] = candidate
+                        logger.info(
+                            f"Resolved reasoning_parser_plugin to: {candidate}"
+                        )
+                    else:
+                        logger.warning(
+                            f"reasoning_parser_plugin '{plugin}' not found in "
+                            f"model dir '{model_dir}'; passing as-is"
+                        )
 
         model_args, env_vars = configure_devices(
             model_args, parallel_size_param="tensor_parallel_size"
